@@ -1,41 +1,52 @@
-from unreal_auto_mod import gen_py_utils as general_utils
-from unreal_auto_mod import script_states, thread_engine_monitor, ue_dev_py_enums, ue_dev_py_utils, utilities
-from unreal_auto_mod.enums import ExecutionMode, ScriptStateType
+from unreal_auto_mod import (
+    app_runner,
+    hook_states,
+    logger,
+    process_management,
+    settings,
+)
+from unreal_auto_mod.data_structures import (
+    ExecutionMode,
+    HookStateType,
+    PackagingDirType,
+)
+from unreal_auto_mod.programs import unreal_engine
+from unreal_auto_mod.threads import thread_engine_monitor
 
 
+@hook_states.hook_state_decorator(HookStateType.PRE_ENGINE_OPEN)
 def open_game_engine():
-    script_states.ScriptState.set_script_state(ScriptStateType.PRE_ENGINE_OPEN)
-    command = ue_dev_py_utils.get_unreal_editor_exe_path(utilities.get_unreal_engine_dir())
-    utilities.run_app(command, ExecutionMode.ASYNC, utilities.get_engine_launch_args())
-    script_states.ScriptState.set_script_state(ScriptStateType.POST_ENGINE_OPEN)
+    command = unreal_engine.get_unreal_editor_exe_path(settings.get_unreal_engine_dir())
+    app_runner.run_app(command, ExecutionMode.ASYNC, settings.get_engine_launch_args())
+    thread_engine_monitor.engine_monitor_thread()
 
 
+@hook_states.hook_state_decorator(HookStateType.POST_ENGINE_CLOSE)
+def post_engine_closed_message():
+    logger.log_message("Closed Unreal Engine.")
+
+
+@hook_states.hook_state_decorator(HookStateType.PRE_ENGINE_CLOSE)
 def close_game_engine():
-    script_states.ScriptState.set_script_state(ScriptStateType.PRE_ENGINE_CLOSE)
-    if ue_dev_py_utils.get_win_dir_type(utilities.get_unreal_engine_dir()) == ue_dev_py_enums.PackagingDirType.WINDOWS_NO_EDITOR:
-        game_engine_processes = general_utils.get_processes_by_substring('UE4Editor')
+    if (
+        unreal_engine.get_win_dir_type(settings.get_unreal_engine_dir())
+        == PackagingDirType.WINDOWS_NO_EDITOR
+    ):
+        game_engine_processes = process_management.get_processes_by_substring(
+            "UE4Editor"
+        )
     else:
-        game_engine_processes = general_utils.get_processes_by_substring('UnrealEditor')
+        game_engine_processes = process_management.get_processes_by_substring(
+            "UnrealEditor"
+        )
     for process_info in game_engine_processes:
-        general_utils.kill_process(process_info['name'])
-    script_states.ScriptState.set_script_state(ScriptStateType.POST_ENGINE_CLOSE)
-
-
-def fix_up_uproject_redirectors():
-    close_game_engine()
-    arg = '-run=ResavePackages -fixupredirects'
-    command = f'"{ue_dev_py_utils.get_unreal_editor_exe_path(utilities.get_unreal_engine_dir())}" "{utilities.get_uproject_file()}" {arg}'
-    utilities.run_app(command)
+        process_management.kill_process(process_info["name"])
+    post_engine_closed_message()
 
 
 def toggle_engine_off():
-    if utilities.is_toggle_engine_during_testing_in_use():
-        close_game_engine()
+    close_game_engine()
 
 
 def toggle_engine_on():
-    if utilities.is_toggle_engine_during_testing_in_use():
-        if utilities.get_fix_up_redirectors_before_engine_open():
-            fix_up_uproject_redirectors()
-        open_game_engine()
-        thread_engine_monitor.engine_monitor_thread()
+    open_game_engine()

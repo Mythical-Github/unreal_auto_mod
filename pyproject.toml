@@ -1,13 +1,13 @@
 [build-system]
-requires = ["hatchling", "hatch-vcs"]
+requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
 name = "unreal_auto_mod"
-dynamic = ["version"]
-description = "Easy To Use Command Line Modding Utility For Unreal Engine Games 4.0-5.5"
+version = "1.11.0-dev.14288112597"
+description = "Unreal Engine modding tool, that covers project management, automated builds, and more"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.9.1"
 license = { file = "LICENSE" }
 keywords = []
 authors = [
@@ -22,12 +22,32 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: CPython",
 ]
 dependencies = [
-  "pyjson5",
   "requests",
   "psutil",
   "pygetwindow",
   "screeninfo",
-  "rich"
+  "rich",
+  "click",
+  "trogon",
+  "tomlkit",
+  "pywinctl",
+  "dynaconf"
+]
+
+[tool.hatch.envs.dev]
+dependencies = [
+  "pre-commit",
+  "commitizen",
+  "py_project_dev_tools @ git+https://github.com/Mythical-Github/py_project_dev_tools"
+]
+
+[tool.hatch.envs.docs]
+dependencies = [
+  "mkdocs-material",
+  "mkdocstrings-python",
+  "pre-commit",
+  "commitizen",
+  "py_project_dev_tools @ git+https://github.com/Mythical-Github/py_project_dev_tools"
 ]
 
 [project.urls]
@@ -40,12 +60,6 @@ unreal_auto_mod = "unreal_auto_mod.__main__:main"
 
 [tool.hatch.metadata]
 allow-direct-references = true
-
-[tool.hatch.version]
-source = "vcs"
-
-[tool.hatch.build.hooks.vcs]
-version-file = "src/unreal_auto_mod/_version.py"
 
 [tool.hatch.env]
 requires = ["hatch-pip-compile"]
@@ -65,7 +79,8 @@ dependencies = [
 
 [tool.hatch.envs.build.scripts]
 exe = [
-  "pyinstaller --noconfirm --onefile --console --name unreal_auto_mod --icon=assets/images/project_main_icon.ico src/unreal_auto_mod/__main__.py",
+  "pyinstaller --noconfirm --onefile --hidden-import=textual.widgets._tab --console --name unreal_auto_mod --icon=assets/images/project_main_icon.ico --collect-data trogon src/unreal_auto_mod/__main__.py",
+  "pyinstaller --noconfirm --onefile --hidden-import=textual.widgets._tab --console --name unreal_auto_mod_headless --icon=assets/images/project_main_icon.ico --collect-data trogon src/unreal_auto_mod/__main__.pyw"
 ]
 
 [tool.hatch.envs.scripts]
@@ -79,4 +94,45 @@ refresh-deps = [
   "hatch env remove default",
   "python -c \"import os; os.remove('requirements.txt')\"",
   "hatch env create default",
+]
+
+[tool.ruff]
+exclude = [
+    "src/unreal_auto_mod/cli.py"
+]
+
+[tool.typos]
+[tool.typos.default]
+extend-words = { ue = "ue" }
+
+[tool.pyright]
+extraPaths = [".venv/Lib/site-packages"]
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+tag_format = "$version"
+version_scheme = "semver2"
+version_provider = "pep621"
+update_changelog_on_bump = true
+
+[tool.hatch.envs.x86_64-pc-windows-msvc]
+dependencies = [
+  "pywin32",
+  "py_project_dev_tools @ git+https://github.com/Mythical-Github/py_project_dev_tools"
+]
+
+[tool.hatch.envs.i686-pc-windows-msvc]
+dependencies = [
+  "pywin32",
+  "py_project_dev_tools @ git+https://github.com/Mythical-Github/py_project_dev_tools"
+]
+
+[tool.hatch.envs.aarch64-unknown-linux-gnu]
+dependencies = [
+  "py_project_dev_tools @ git+https://github.com/Mythical-Github/py_project_dev_tools"
+]
+
+[tool.hatch.envs.x86_64-unknown-linux-gnu]
+dependencies = [
+  "py_project_dev_tools @ git+https://github.com/Mythical-Github/py_project_dev_tools"
 ]

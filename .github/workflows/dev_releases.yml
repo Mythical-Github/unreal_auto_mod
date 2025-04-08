@@ -1,0 +1,327 @@
+name: dev_releases
+
+on:
+  schedule:
+    - cron: '0 19 * * *'
+
+jobs:
+  setup_ubuntu_x86_64:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: 'refs/heads/dev'
+
+      - name: Setup Python (x64)
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.x
+          architecture: "x64"
+
+      - name: Install Hatch
+        run: pip install hatch
+
+      - name: Create Hatch virtual environment for x86_64-linux
+        run: hatch env create x86_64-unknown-linux-gnu
+
+      - name: Build Release
+        run: hatch run py_project_dev_tools make_exe_release_ci_cd --os_arch_line "x86_64-unknown-linux-gnu"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: unreal_auto_mod_x86_64-unknown-linux-gnu
+          path: dist/unreal_auto_mod_x86_64-unknown-linux-gnu.zip
+
+  setup_ubuntu_aarch64:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: 'refs/heads/dev'
+
+      - name: Setup Python (arm64)
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.x
+          architecture: "arm64"
+
+      - name: Install Hatch
+        run: pip install hatch
+
+      - name: Create Hatch virtual environment for aarch64-linux
+        run: hatch env create aarch64-unknown-linux-gnu
+
+      - name: Build Release
+        run: hatch run py_project_dev_tools make_exe_release_ci_cd --os_arch_line "aarch64-unknown-linux-gnu"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: unreal_auto_mod_aarch64-unknown-linux-gnu
+          path: dist/unreal_auto_mod_aarch64-unknown-linux-gnu.zip
+
+  setup_windows_x86_64:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: 'refs/heads/dev'
+
+      - name: Setup Python (x64)
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.x
+          architecture: "x64"
+
+      - name: Install Hatch
+        run: pip install hatch
+
+      - name: Create Hatch virtual environment for x86_64-windows
+        run: hatch env create x86_64-pc-windows-msvc
+
+      - name: Build Release
+        run: hatch run py_project_dev_tools make_exe_release_ci_cd --os_arch_line "x86_64-pc-windows-msvc"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: unreal_auto_mod_x86_64-pc-windows-msvc
+          path: dist/unreal_auto_mod_x86_64-pc-windows-msvc.zip
+
+  setup_windows_i686:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: 'refs/heads/dev'
+
+      - name: Setup Python (x86)
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.x
+          architecture: "x86"
+
+      - name: Install Hatch
+        run: pip install hatch
+
+      - name: Create Hatch virtual environment for i686-windows
+        run: hatch env create i686-pc-windows-msvc
+
+      - name: Build Release
+        run: hatch run py_project_dev_tools make_exe_release_ci_cd --os_arch_line "i686-pc-windows-msvc"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: unreal_auto_mod_i686-pc-windows-msvc
+          path: dist/unreal_auto_mod_i686-pc-windows-msvc.zip
+
+  bump_version:
+    runs-on: ubuntu-latest
+    needs: [setup_ubuntu_x86_64, setup_ubuntu_aarch64, setup_windows_x86_64, setup_windows_i686]
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          token: "${{ secrets.PERSONAL_ACCESS_TOKEN }}"
+          fetch-depth: 0
+          ref: 'refs/heads/dev'
+
+      - name: Create bump and changelog
+        uses: commitizen-tools/commitizen-action@master
+        with:
+          github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          changelog_increment_filename: body.md
+          devrelease: ${{ github.run_id }}
+
+      - name: Create version.txt
+        run: |
+          echo "Revision: ${{ env.REVISION }}" > version.txt
+
+      - name: Upload version.txt
+        uses: actions/upload-artifact@v4
+        with:
+          name: version.txt
+          path: version.txt
+
+      - name: Upload changelog body.md
+        uses: actions/upload-artifact@v4
+        with:
+          name: body.md
+          path: body.md
+
+
+
+  setup_wheels_and_source_distributions:
+      runs-on: ubuntu-latest
+      outputs:
+        wheel_artifact_name: ${{ steps.find_wheel.outputs.artifact_name }}
+        sdist_artifact_name: ${{ steps.find_sdist.outputs.artifact_name }}
+      needs: [bump_version]
+      steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: 'refs/heads/dev'
+
+      - name: Setup Python (x64)
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.x
+          architecture: "x64"
+
+      - name: Install Hatch
+        run: pip install hatch
+
+      - name: Build Wheels and Source Distributions
+        run: hatch build
+
+      - name: Publish Wheels and Source Distributions
+        run: hatch publish --repo "main" --user "__token__" --auth "${{ secrets.PYPI_PASSWORD }}"
+
+      - name: Find wheel file
+        id: find_wheel
+        run: |
+          WHEEL_PATH=$(find dist -name "*.whl" | head -n 1)
+          WHEEL_NAME=$(basename "$WHEEL_PATH")
+          ARTIFACT_NAME="${WHEEL_NAME%.whl}"
+          echo "wheel_path=$WHEEL_PATH" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Upload python wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.find_wheel.outputs.artifact_name }}
+          path: ${{ steps.find_wheel.outputs.wheel_path }}
+
+      - name: Find sdist file
+        id: find_sdist
+        run: |
+          SDIST_PATH=$(find dist -name "*.tar.gz" | head -n 1)
+          SDIST_NAME=$(basename "$SDIST_PATH")
+          ARTIFACT_NAME="${SDIST_NAME%.tar.gz}"
+          echo "sdist_path=$SDIST_PATH" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Upload python sdist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.find_sdist.outputs.artifact_name }}
+          path: ${{ steps.find_sdist.outputs.sdist_path }}
+
+  setup_github_releases:
+    runs-on: ubuntu-latest
+    needs: [setup_wheels_and_source_distributions]
+    steps:
+      - name: Download ubuntu_x86_64_artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: unreal_auto_mod_x86_64-unknown-linux-gnu
+          path: ./dist
+
+      - name: Download ubuntu_aarch64_artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: unreal_auto_mod_aarch64-unknown-linux-gnu
+          path: ./dist
+
+      - name: Download windows_x86_64_artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: unreal_auto_mod_x86_64-pc-windows-msvc
+          path: ./dist
+
+      - name: Download windows_i686_artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: unreal_auto_mod_i686-pc-windows-msvc
+          path: ./dist
+
+      - name: Download windows_i686_artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: unreal_auto_mod_i686-pc-windows-msvc
+          path: ./dist
+
+      - name: Download python_wheel_artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.setup_wheels_and_source_distributions.outputs.wheel_artifact_name }}
+          path: ./dist
+
+      - name: Download python_sdist_artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.setup_wheels_and_source_distributions.outputs.sdist_artifact_name }}
+          path: ./dist
+
+      - name: Download version.txt artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: version.txt
+
+      - name: Read version from version.txt
+        id: extract_version
+        run: |
+          # Read the contents of the downloaded version.txt file and extract the revision
+          VERSION=$(cat version.txt | grep -oP 'Revision: \K.*')  # Extract the version number after "Revision: "
+          echo "Version extracted: $VERSION"
+          echo "VERSION=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Rename artifacts with version suffix
+        run: |
+          VERSION="${{ steps.extract_version.outputs.version }}"
+
+          cd dist
+
+          for FILE in unreal_auto_mod*.zip; do
+            if [[ "$FILE" != *"$VERSION"* ]]; then
+              BASE="${FILE%.zip}"
+              # Replace underscores with hyphens and add version
+              NEW_NAME=$(echo "$BASE" | sed 's/_/-/g')-"$VERSION".zip
+              mv "$FILE" "$NEW_NAME"
+            fi
+          done
+
+      - name: Generate SHA256 hashes for each file
+        run: |
+          cd dist
+
+          # For each file in dist, generate its SHA256 hash and create a .sha256 file
+          for FILE in *; do
+            if [[ -f "$FILE" ]]; then
+              # Generate SHA256 hash and save it to a .sha256 file
+              sha256sum "$FILE" | awk '{print $1}' > "$FILE.sha256"
+            fi
+          done
+
+      - name: List files in dist
+        run: ls -R dist
+
+      - name: Download body.md artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: body.md
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: "body.md"
+          tag_name: ${{ steps.extract_version.outputs.version }}
+          files: |
+            dist/*.zip
+            dist/*.whl
+            dist/*.tar.gz
+            dist/*.sha256
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
