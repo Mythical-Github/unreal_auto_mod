@@ -1,254 +1,208 @@
 import os
-import pathlib
-import shutil
-import subprocess
-from dataclasses import dataclass
-from typing import Any
-import json
+import sys
+import time
 
-from unreal_auto_mod import (
-    file_io,
-    logger,
-    process_management,
-    window_management,
-)
-from unreal_auto_mod.programs import unreal_engine
+import psutil
+import pyjson5 as json
 
+import unreal_auto_mod.gen_py_utils as gen_utils
+from unreal_auto_mod import mods
 
-@dataclass
-class SettingsInformation:
-    settings: dict[str, Any]
-    init_settings_done: bool
-    settings_json_dir: str
-    program_dir: str
-    mod_names: list[str]
-    settings_json: str
+start_time = time.time()
+
+settings = ''
+init_settings_done = False
+settings_json_dir = ''
+program_dir = ''
+mod_names = []
+settings_json = ''
 
 
-settings_information = SettingsInformation(
-    settings={},
-    init_settings_done=False,
-    settings_json_dir="",
-    program_dir="",
-    mod_names=[],
-    settings_json="",
-)
+if getattr(sys, 'frozen', False):
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(sys.executable))
+else:
+    SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
+os.chdir(SCRIPT_DIR)
 
 
-def init_settings(settings_json_path: pathlib.Path):
-    with open(settings_json_path, "r") as file:
-        raw_settings = json.load(file)
-    # raw_settings = Dynaconf(settings_files=[settings_json_path])
-    # settings_information.settings = configs.DynamicSettings(raw_settings)
-    settings_information.settings = raw_settings
-    settings = settings_information.settings
-    process_name = os.path.basename(settings["game_info"]["game_exe_path"])
-    window_management.change_window_name(settings["general_info"]["window_title"])
-    auto_close_game = settings["process_kill_events"]["auto_close_game"]
-    is_process_running = process_management.is_process_running(process_name)
-    if auto_close_game and is_process_running:
-        taskkill_path = shutil.which("taskkill")
+def init_settings(settings_json_path: str):
+    global settings
+    global init_settings_done
+    global settings_json
+    global settings_json_dir
 
-        if taskkill_path:
-            subprocess.run([taskkill_path, "/F", "/IM", process_name], check=False)
-        else:
-            taskkill_exe_not_found_error = "taskkill.exe not found."
-            raise FileNotFoundError(taskkill_exe_not_found_error)
-    settings_information.init_settings_done = True
-    settings_information.settings_json = str(settings_json_path)
-    settings_information.settings_json_dir = os.path.dirname(
-        settings_information.settings_json
-    )
+    with open(settings_json_path) as file:
+        settings = json.load(file)
+    window_name = settings['general_info']['window_title']
+    os.system(f'title {window_name}')
+    auto_close_game = settings['process_kill_info']['auto_close_game']
+    if auto_close_game:
+        def is_process_running(process_name):
+            for proc in psutil.process_iter():
+                try:
+                    if process_name.lower() in proc.name().lower():
+                        return True
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    pass
+            return False
+
+        process_name = settings['game_info']['game_exe_path']
+        process_name = os.path.basename(process_name)
+        if is_process_running(process_name):
+            os.system(f'taskkill /f /im {process_name}')
+    init_settings_done = True
+    settings_json = settings_json_path
+    settings_json_dir = os.path.dirname(settings_json)
+
+
+def check_file_exists(file_path: str) -> bool:
+    if os.path.exists(file_path):
+        return True
+    else:
+        raise FileNotFoundError(f'File "{file_path}" not found.')
+
+
+def unreal_engine_check():
+    from unreal_auto_mod import log_py as log
+    from unreal_auto_mod import ue_dev_py_utils as ue_dev_utils
+    from unreal_auto_mod import utilities
+
+    should_do_check = True
+
+    if utilities.get_should_ship_uproject_steps():
+        if not utilities.is_unreal_pak_packing_enum_in_use():
+               should_do_check = False
+
+    if should_do_check:
+        engine_str = 'UE4Editor'
+        if ue_dev_utils.is_game_ue5(utilities.get_unreal_engine_dir()):
+            engine_str = 'UnrealEditor'
+        check_file_exists(f'{utilities.get_unreal_engine_dir()}/Engine/Binaries/Win64/{engine_str}.exe')
+        log.log_message('Check: Unreal Engine exists')
+
+
+def init_checks():
+    from unreal_auto_mod import log_py as log
+    from unreal_auto_mod import utilities
+    if not utilities.get_should_ship_uproject_steps():
+        check_file_exists(utilities.get_uproject_file())
+        log.log_message('Check: Uproject file exists')
+
+    unreal_engine_check()
+
+    if utilities.get_is_using_repak_path_override():
+        check_file_exists(utilities.get_repak_path_override())
+        log.log_message('Check: Repak exists')
+
+    if not utilities.get_skip_launching_game():
+        check_file_exists(utilities.get_game_exe_path())
+        log.log_message('Check: Game exists')
+
+    log.log_message('Check: Passed all init checks')
 
 
 def load_settings(settings_json: str):
-    logger.log_message(f"settings json: {settings_json}")
-    if not settings_information.init_settings_done:
-        init_settings(pathlib.Path(settings_json))
+    if not init_settings_done:
+        init_settings(settings_json)
+    init_checks()
+    with open(settings_json) as file:
+        return json.load(file)
 
 
-def get_unreal_engine_dir() -> str:
-    ue_dir = settings_information.settings["engine_info"]["unreal_engine_dir"]
-    file_io.check_path_exists(ue_dir)
-    return ue_dir
+def save_settings(settings_json: str):
+    with open(settings_json, 'w') as file:
+        json.dump(settings, file, indent=2)
 
 
-def is_unreal_pak_packing_enum_in_use():
-    is_in_use = False
-    for entry in get_mods_info_list_from_json():
-        if entry["packing_type"] == "unreal_pak":
-            is_in_use = True
-    return is_in_use
+def pass_settings(settings_json: str):
+    load_settings(settings_json)
 
 
-def is_engine_packing_enum_in_use():
-    is_in_use = False
-    for entry in get_mods_info_list_from_json():
-        if entry["packing_type"] == "engine":
-            is_in_use = True
-    return is_in_use
+def test_mods(settings_json: str, input_mod_names: str):
+    load_settings(settings_json)
+    global mod_names
+    for mod_name in input_mod_names:
+        mod_names.append(mod_name)
+    mods.create_mods()
 
 
-def get_game_exe_path() -> str:
-    return settings_information.settings["game_info"]["game_exe_path"]
+def test_mods_all(settings_json: str):
+    load_settings(settings_json)
+    global mod_names
+    for entry in settings['mod_pak_info']:
+        mod_names.append(entry['mod_name'])
+    mods.create_mods()
 
 
-def get_git_info_repo_path() -> str:
-    return settings_information.settings["git_info"]["repo_path"]
+def open_stove(settings_json: str):
+    load_settings(settings_json)
+    from unreal_auto_mod import utilities
+    if not os.path.isfile(utilities.does_stove_exist()):
+        utilities.install_stove()
+    utilities.run_app(utilities.get_stove_path(),)
 
 
-def get_game_launcher_exe_path() -> str:
-    return settings_information.settings["game_info"]["game_launcher_exe"]
+def open_spaghetti(settings_json: str):
+    load_settings(settings_json)
+    from unreal_auto_mod import utilities
+    if not os.path.isfile(utilities.get_spaghetti_path()):
+        utilities.install_spaghetti()
+    utilities.run_app(utilities.get_spaghetti_path())
 
 
-def get_override_automatic_launcher_exe_finding() -> bool:
-    return settings_information.settings["game_info"][
-        "override_automatic_launcher_exe_finding"
-    ]
+def open_kismet_analyzer(settings_json: str):
+    load_settings(settings_json)
+    from unreal_auto_mod import utilities
+    # add shell stuff to run app later or something
+    if not os.path.isfile(utilities.get_kismet_analyzer_path()):
+        utilities.install_kismet_analyzer()
+    import subprocess
+    kismet_analyzer_path = utilities.get_kismet_analyzer_path()
+    kismet_directory = os.path.dirname(kismet_analyzer_path)
+    command = f'cd /d "{kismet_directory}" && "{kismet_analyzer_path}" -h && set ka=kismet-analyzer.exe && cmd /k'
+    subprocess.run(command, shell=True, check=False)
 
 
-def get_uproject_file() -> str:
-    return settings_information.settings["engine_info"]["unreal_project_file"]
+def open_uasset_gui(settings_json: str):
+    load_settings(settings_json)
+    from unreal_auto_mod import utilities
+    if not os.path.isfile(utilities.get_uasset_gui_path()):
+        utilities.install_uasset_gui()
+    utilities.run_app(utilities.get_uasset_gui_path())
 
 
-def get_unreal_engine_packaging_main_command() -> str:
-    return settings_information.settings["engine_info"]["engine_packaging_command"]
+def open_latest_log(settings_json: str):
+    load_settings(settings_json)
+    from unreal_auto_mod import utilities
+    file_to_open = f'{utilities.get_uproject_unreal_auto_mod_resources_dir()}/UnrealAutoMod/logs/latest.log'
+    gen_utils.open_file_in_default(file_to_open)
 
 
-def get_unreal_engine_cooking_main_command() -> str:
-    return settings_information.settings["engine_info"]["engine_cooking_command"]
+def open_settings_json(settings_json: str):
+    load_settings(settings_json)
+    gen_utils.open_file_in_default(settings.settings_json)
 
 
-def get_unreal_engine_building_main_command() -> str:
-    return settings_information.settings["engine_info"]["engine_building_command"]
+def run_game(settings_json: str):
+    load_settings(settings_json)
+    from unreal_auto_mod import game_runner, thread_game_monitor
+    game_runner.run_game()
+    thread_game_monitor.game_monitor_thread()
 
 
-def get_cleanup_repo_path() -> str:
-    return settings_information.settings["git_info"]["repo_path"]
+def open_umodel(settings_json: str):
+    load_settings(settings_json)
+    from unreal_auto_mod import utilities
+    if not os.path.isfile(utilities.does_umodel_exist()):
+        utilities.install_umodel()
+    # Sets dir, so it's the dir opened by default in umodel
+    os.chdir(os.path.dirname(utilities.custom_get_game_dir()))
+    utilities.run_app(utilities.get_umodel_path())
 
 
-def get_window_title() -> str:
-    return settings_information.settings["general_info"]["window_title"]
-
-
-def get_window_title_override() -> str:
-    return settings_information.settings["game_info"]["window_title_override"]
-
-
-def get_override_automatic_window_title_finding() -> bool:
-    return settings_information.settings["game_info"][
-        "override_automatic_window_title_finding"
-    ]
-
-
-def get_is_overriding_automatic_version_finding() -> bool:
-    return settings_information.settings["repak_info"][
-        "override_automatic_version_finding"
-    ]
-
-
-def get_engine_building_args() -> list:
-    return settings_information.settings["engine_info"]["engine_building_args"]
-
-
-def get_engine_packaging_args() -> list:
-    return settings_information.settings["engine_info"]["engine_packaging_args"]
-
-
-def get_engine_cooking_args() -> list:
-    return settings_information.settings["engine_info"]["engine_cooking_args"]
-
-
-def get_window_management_events() -> dict:
-    return settings_information.settings["window_management_events"]
-
-
-def get_override_working_dir() -> str:
-    return settings_information.settings["general_info"]["working_dir"]
-
-
-def get_is_overriding_default_working_dir() -> bool:
-    return settings_information.settings["general_info"]["override_default_working_dir"]
-
-
-def get_persistent_mod_dir(mod_name: str) -> str:
-    return f"{settings_information.settings_json_dir}/mod_packaging/persistent_files/{mod_name}"
-
-
-def get_persistent_mods_dir() -> str:
-    return f"{settings_information.settings_json_dir}/mod_packaging/persistent_files"
-
-
-def get_override_automatic_version_finding() -> bool:
-    return settings_information.settings["engine_info"][
-        "override_automatic_version_finding"
-    ]
-
-
-def get_alt_packing_dir_name() -> str:
-    return settings_information.settings["packaging_uproject_name"]["name"]
-
-
-def get_is_using_alt_dir_name() -> bool:
-    return settings_information.settings["packaging_uproject_name"]["use_override"]
-
-
-def get_mods_info_list_from_json() -> list:
-    return settings_information.settings["mods_info"]
-
-
-def get_exec_events() -> list:
-    return settings_information.settings["exec_events"]
-
-
-def get_ide_path() -> str:
-    return settings_information.settings["optionals"]["ide_path"]
-
-
-def get_blender_path():
-    return settings_information.settings["optionals"]["blender_path"]
-
-
-def get_game_info_launch_type_enum_str_value() -> str:
-    return settings_information.settings["game_info"]["launch_type"]
-
-
-def get_game_id() -> int:
-    return settings_information.settings["game_info"]["game_id"]
-
-
-def get_game_launch_params() -> list:
-    return settings_information.settings["game_info"]["launch_params"]
-
-
-def get_engine_launch_args() -> list:
-    return settings_information.settings["engine_info"]["engine_launch_args"]
-
-
-def custom_get_unreal_engine_version(engine_path: str) -> str:
-    if get_override_automatic_version_finding():
-        unreal_engine_major_version = settings_information.settings["engine_info"][
-            "unreal_engine_major_version"
-        ]
-        unreal_engine_minor_version = settings_information.settings["engine_info"][
-            "unreal_engine_minor_version"
-        ]
-        return f"{unreal_engine_major_version}.{unreal_engine_minor_version}"
-    return unreal_engine.get_unreal_engine_version(engine_path)
-
-
-def get_working_dir() -> str:
-    if get_is_overriding_default_working_dir():
-        working_dir = get_override_working_dir()
-    else:
-        working_dir = os.path.join(file_io.SCRIPT_DIR, "working_dir")
-    os.makedirs(working_dir, exist_ok=True)
-    return working_dir
-
-
-def is_loose_packing_enum_in_use():
-    is_in_use = False
-    for entry in get_mods_info_list_from_json():
-        if entry["packing_type"] == "loose":
-            is_in_use = True
-    return is_in_use
+def open_fmodel(settings_json: str):
+    load_settings(settings_json)
+    from unreal_auto_mod import utilities
+    if not os.path.isfile(utilities.get_fmodel_path()):
+        utilities.install_fmodel()
+    utilities.run_app(utilities.get_fmodel_path())
