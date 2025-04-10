@@ -1,6 +1,7 @@
 <h1 id="title" align="left">UnrealAutoMod</h1>
 
-NOTICE: The below documentation is slightly out of date, but mostly valid. It will be updated soon.  <br>
+## Notice: `unreal_auto_mod` has been renamed back to `tempo`, and all further development will continue [here](https://github.com/Tempo-Organization/tempo).
+
 
 Easy To Use Command Line Modding Utility For Unreal Engine Games 4.0-5.5 <br>
 Automates creation, and placement, of mod archives, and other various actions. <br>
@@ -44,31 +45,31 @@ You can keep the program anywhere you'd like.
 
 Most users will only need to edit a few settings, which can be done with a text editor. In the JSON file, you typically need to update the following:
 
-- **Unreal Engine `.uproject` File Path**
+- **Unreal Engine `.uproject` File Path**  
   Specify the path to your Unreal Engine project file.
 
-- **Unreal Engine Directory**
+- **Unreal Engine Directory**  
   Define the directory where Unreal Engine is installed.
 
-- **Game's Win64 Executable Path**
+- **Game's Win64 Executable Path**  
   Set the path to the game's Win64 executable. Ensure that the path is valid:
-  - **Correct Example:**
+  - **Correct Example:**  
     `"D:\SteamLibrary\steamapps\common\Zedfest\KevinSpel\Binaries\Win64\Zedfest.exe"`
-  - **Incorrect Example:**
+  - **Incorrect Example:**  
     `"D:\SteamLibrary\steamapps\common\Zedfest\KevinSpel.exe"`
 
-- **Steam App ID**
+- **Steam App ID**  
   If using the Steam launch method (as opposed to the executable method), enter the Steam App ID.
 
-- **Window Title Override String**
+- **Window Title Override String**  
   Specify the string for the launched game's window label.
 
 After configuring these settings, you can proceed to configure the mod list.
 
 ###
-3. **Configure the mod list:**
+3. **Configure the mod list:**  
    You can include any number of mod entries in the list.
-
+  
 
   ```
    {
@@ -142,7 +143,7 @@ After configuring these settings, you can proceed to configure the mod list.
 
 ###
 
-4. **Run the application:**
+4. **Run the application:**  
    Once everything is set up, you can proceed to the [Running Steps](#running-steps).
 
 <h2 id="running-steps">🏃 Running Steps:</h2>
